@@ -4,18 +4,13 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.os.Handler;
 import android.support.annotation.Nullable;
-import android.text.Layout;
-import android.text.SpannableStringBuilder;
-import android.text.Spanned;
-import android.text.StaticLayout;
-import android.text.TextPaint;
-import android.text.style.RelativeSizeSpan;
 import android.util.AttributeSet;
 import android.view.View;
 
 import java.util.Calendar;
-import java.util.Locale;
+import java.util.Date;
 
 public class Clock extends View {
 
@@ -35,25 +30,27 @@ public class Clock extends View {
 
     private static final int RIGHT_ANGLE = 90;
 
+    private float PANEL_RADIUS = 200.0f;// 表盘半径
+
+    private float HOUR_POINTER_LENGTH;// 指针长度
+    private float MINUTE_POINTER_LENGTH;
+    private float SECOND_POINTER_LENGTH;
+    private float UNIT_DEGREE = (float) (6 * Math.PI / 180);// 一个小格的度数
+
     private int mWidth, mCenterX, mCenterY, mRadius;
-
-    /**
-     * properties
-     */
-    private int centerInnerColor;
-    private int centerOuterColor;
-
-    private int secondsNeedleColor;
-    private int hoursNeedleColor;
-    private int minutesNeedleColor;
 
     private int degreesColor;
 
-    private int hoursValuesColor;
+    private Paint mNeedlePaint;
 
-    private int numbersColor;
-
-    private boolean mShowAnalog = true;
+    private Handler handler = new Handler();
+    private Runnable runnable = new Runnable() {
+        @Override
+        public void run() {
+            invalidate();
+            handler.postDelayed(this, 1000); // 每秒刷新一次
+        }
+    };
 
     public Clock(Context context) {
         super(context);
@@ -87,22 +84,20 @@ public class Clock extends View {
         }
 
         setMeasuredDimension(size + getPaddingLeft() + getPaddingRight(), size + getPaddingTop() + getPaddingBottom());
+
     }
 
     private void init(Context context, AttributeSet attrs) {
 
-        this.centerInnerColor = Color.LTGRAY;
-        this.centerOuterColor = DEFAULT_PRIMARY_COLOR;
-
-        this.secondsNeedleColor = DEFAULT_SECONDARY_COLOR;
-        this.hoursNeedleColor = DEFAULT_PRIMARY_COLOR;
-        this.minutesNeedleColor = DEFAULT_PRIMARY_COLOR;
-
         this.degreesColor = DEFAULT_PRIMARY_COLOR;
 
-        this.hoursValuesColor = DEFAULT_PRIMARY_COLOR;
+        mNeedlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        mNeedlePaint.setStyle(Paint.Style.FILL_AND_STROKE);
+        mNeedlePaint.setStrokeCap(Paint.Cap.ROUND);
 
-        numbersColor = Color.WHITE;
+
+        handler.post(runnable); // 启动定时任务
+
     }
 
     @Override
@@ -115,15 +110,16 @@ public class Clock extends View {
         mCenterX = halfWidth;
         mCenterY = halfWidth;
         mRadius = halfWidth;
+        PANEL_RADIUS = mRadius;
+        HOUR_POINTER_LENGTH = PANEL_RADIUS - 400;
+        MINUTE_POINTER_LENGTH = PANEL_RADIUS - 250;
+        SECOND_POINTER_LENGTH = PANEL_RADIUS - 150;
 
-        if (mShowAnalog) {
-            drawDegrees(canvas);
-            drawHoursValues(canvas);
-            drawNeedles(canvas);
-            drawCenter(canvas);
-        } else {
-            drawNumbers(canvas);
-        }
+        drawDegrees(canvas);
+        drawHoursValues(canvas);
+        drawNeedles(canvas);
+
+        // todo 每一秒刷新一次，让指针动起来
 
     }
 
@@ -158,46 +154,36 @@ public class Clock extends View {
     }
 
     /**
-     * @param canvas
-     */
-    private void drawNumbers(Canvas canvas) {
-
-        TextPaint textPaint = new TextPaint();
-        textPaint.setTextSize(mWidth * 0.2f);
-        textPaint.setColor(numbersColor);
-        textPaint.setColor(numbersColor);
-        textPaint.setAntiAlias(true);
-
-        Calendar calendar = Calendar.getInstance();
-
-        int hour = calendar.get(Calendar.HOUR);
-        int minute = calendar.get(Calendar.MINUTE);
-        int second = calendar.get(Calendar.SECOND);
-        int amPm = calendar.get(Calendar.AM_PM);
-
-        String time = String.format("%s:%s:%s%s",
-                String.format(Locale.getDefault(), "%02d", hour),
-                String.format(Locale.getDefault(), "%02d", minute),
-                String.format(Locale.getDefault(), "%02d", second),
-                amPm == AM ? "AM" : "PM");
-
-        SpannableStringBuilder spannableString = new SpannableStringBuilder(time);
-        spannableString.setSpan(new RelativeSizeSpan(0.3f), spannableString.toString().length() - 2, spannableString.toString().length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); // se superscript percent
-
-        StaticLayout layout = new StaticLayout(spannableString, textPaint, canvas.getWidth(), Layout.Alignment.ALIGN_CENTER, 1, 1, true);
-        canvas.translate(mCenterX - layout.getWidth() / 2f, mCenterY - layout.getHeight() / 2f);
-        layout.draw(canvas);
-    }
-
-    /**
      * Draw Hour Text Values, such as 1 2 3 ...
      *
      * @param canvas
      */
     private void drawHoursValues(Canvas canvas) {
+
         // Default Color:
         // - hoursValuesColor
+        //有60个刻度，各5个刻一个
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.WHITE);
+        paint.setTextSize(mWidth * 0.05f); // 设置文本大小
+        paint.setTextAlign(Paint.Align.CENTER); // 设置文本对齐方式
 
+        // 半径设置为比刻度短一些，以便将数字绘制在表盘内侧
+        int radius = mCenterX - (int) (mWidth * 0.1f);
+
+        // 遍历每个小时并绘制
+        for (int i = 0; i < 12; i++) {
+            // 计算每个小时的位置，0小时位于正上方
+            float angle = (float) (i * 30); // 每小时间隔30度
+            float angleInRadians = (float) Math.toRadians(angle);
+
+            // 计算文本的位置
+            float x = (float) (mCenterX + radius * Math.sin(angleInRadians));
+            float y = (float) (mCenterY - radius * Math.cos(angleInRadians));
+
+            // 绘制小时数字（1-12）
+            canvas.drawText(String.valueOf(i == 0 ? 12 : i), x, y + paint.getTextSize() / 3, paint);
+        }
 
     }
 
@@ -208,32 +194,60 @@ public class Clock extends View {
      * @param canvas
      */
     private void drawNeedles(final Canvas canvas) {
-        // Default Color:
-        // - secondsNeedleColor
-        // - hoursNeedleColor
-        // - minutesNeedleColor
+        Calendar calendar = Calendar.getInstance();
+        Date now = calendar.getTime();
+        int nowHours = now.getHours();
+        int nowMinutes = now.getMinutes();
+        int nowSeconds = now.getSeconds();
+        // 画秒针
+        drawPointer(canvas, 2, nowSeconds);
+        // 画分针
+        // todo 画分针
+        drawPointer(canvas, 1, nowMinutes);
+        // 画时针
+        int part = nowMinutes / 12;
+        drawPointer(canvas, 0, 5 * nowHours + part);
+
 
     }
 
-    /**
-     * Draw Center Dot
-     *
-     * @param canvas
-     */
-    private void drawCenter(Canvas canvas) {
-        // Default Color:
-        // - centerInnerColor
-        // - centerOuterColor
 
+    private void drawPointer(Canvas canvas, int pointerType, int value) {
+
+        float degree;
+        float[] pointerHeadXY = new float[2];
+
+        mNeedlePaint.setStrokeWidth(mWidth * DEFAULT_DEGREE_STROKE_WIDTH);
+        switch (pointerType) {
+            case 0:
+                degree = value * UNIT_DEGREE;
+                mNeedlePaint.setColor(Color.WHITE);
+                pointerHeadXY = getPointerHeadXY(HOUR_POINTER_LENGTH, degree);
+                break;
+            case 1:
+                // todo 画分针，设置分针的颜色
+                degree = value * UNIT_DEGREE;
+                mNeedlePaint.setColor(Color.BLUE);
+                pointerHeadXY = getPointerHeadXY(MINUTE_POINTER_LENGTH, degree);
+                break;
+
+            case 2:
+                degree = value * UNIT_DEGREE;
+                mNeedlePaint.setColor(Color.BLACK);
+                pointerHeadXY = getPointerHeadXY(SECOND_POINTER_LENGTH, degree);
+                break;
+        }
+
+
+        canvas.drawLine(mCenterX, mCenterY, pointerHeadXY[0], pointerHeadXY[1], mNeedlePaint);
     }
 
-    public void setShowAnalog(boolean showAnalog) {
-        mShowAnalog = showAnalog;
-        invalidate();
+    private float[] getPointerHeadXY(float pointerLength, float degree) {
+        float[] xy = new float[2];
+        xy[0] = (float) (mCenterX + pointerLength * Math.sin(degree));
+        xy[1] = (float) (mCenterY - pointerLength * Math.cos(degree));
+        return xy;
     }
 
-    public boolean isShowAnalog() {
-        return mShowAnalog;
-    }
 
 }
